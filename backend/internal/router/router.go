@@ -47,6 +47,10 @@ func New(log *slog.Logger, authService *service.AuthService, handlers Handlers, 
 	protected.POST("/stations", middleware.RBAC(constants.RoleAnalyst, constants.RoleAdmin), handlers.Station.Create)
 	protected.PUT("/stations/:id", middleware.RBAC(constants.RoleAnalyst, constants.RoleAdmin), handlers.Station.Update)
 
+	protected.GET("/maintenance-windows", handlers.Station.ListMaintenance)
+	protected.POST("/stations/:id/maintenance-windows", middleware.RBAC(constants.RoleAnalyst, constants.RoleAdmin), handlers.Station.CreateMaintenance)
+	protected.PUT("/maintenance-windows/:windowId", middleware.RBAC(constants.RoleAnalyst, constants.RoleAdmin), handlers.Station.UpdateMaintenance)
+
 	protected.GET("/observations", handlers.Observation.List)
 	protected.GET("/observations/:id", handlers.Observation.Get)
 	protected.POST("/observations", middleware.RBAC(constants.RoleObserver, constants.RoleAnalyst, constants.RoleAdmin), handlers.Observation.Create)

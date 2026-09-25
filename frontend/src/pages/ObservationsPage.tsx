@@ -7,6 +7,7 @@ import { PageHeader } from '../components/common/PageHeader'
 import { QualityBadge } from '../components/common/QualityBadge'
 import { useAuth } from '../hooks/useAuth'
 import { useCaseStore } from '../stores/caseStore'
+import { useMaintenanceStore } from '../stores/maintenanceStore'
 import { useObservationStore } from '../stores/observationStore'
 import { useStationStore } from '../stores/stationStore'
 import type { BearingObservation, ObservationInput } from '../types/observation'
@@ -18,6 +19,8 @@ export function ObservationsPage() {
   const loadCases = useCaseStore((state) => state.load)
   const stations = useStationStore((state) => state.stations)
   const loadStations = useStationStore((state) => state.load)
+  const windows = useMaintenanceStore((state) => state.windows)
+  const loadWindows = useMaintenanceStore((state) => state.load)
   const observations = useObservationStore((state) => state.observations)
   const loadObservations = useObservationStore((state) => state.load)
   const createObservation = useObservationStore((state) => state.createObservation)
@@ -33,8 +36,8 @@ export function ObservationsPage() {
   const [form, setForm] = useState<ObservationInput>({ station_id: 0, case_id: 0, bearing_deg: 0, signal_dbm: -70, frequency_hz: 433_920_000, bandwidth_hz: 12_500, quality: 'good' })
 
   useEffect(() => {
-    void Promise.all([loadCases(), loadStations()])
-  }, [loadCases, loadStations])
+    void Promise.all([loadCases(), loadStations(), loadWindows()])
+  }, [loadCases, loadStations, loadWindows])
 
   useEffect(() => {
     if (!caseId && cases[0]) setCaseId(cases[0].id)
@@ -47,11 +50,23 @@ export function ObservationsPage() {
     if (item) setForm((current) => ({ ...current, case_id: item.id, frequency_hz: item.frequency_center_hz }))
   }, [caseId, cases, loadObservations])
 
-  useEffect(() => {
-    if (!form.station_id && stations[0]) setForm((current) => ({ ...current, station_id: stations[0].id }))
-  }, [form.station_id, stations])
-
   const activeObservations = useMemo(() => observations.filter((item) => item.quality !== 'excluded').length, [observations])
+
+  const activeMaintenanceStationIds = useMemo(() => {
+    const ids = new Set<number>()
+    for (const window of windows) {
+      if (window.status === 'active') ids.add(window.station_id)
+    }
+    return ids
+  }, [windows])
+  const selectableStations = useMemo(
+    () => stations.filter((item) => item.station_status === 'active' && !activeMaintenanceStationIds.has(item.id)),
+    [stations, activeMaintenanceStationIds]
+  )
+
+  useEffect(() => {
+    if (!form.station_id && selectableStations[0]) setForm((current) => ({ ...current, station_id: selectableStations[0].id }))
+  }, [form.station_id, selectableStations])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -103,16 +118,19 @@ export function ObservationsPage() {
           <Table size="small" aria-label="方位观测列表">
             <TableHead><TableRow><TableCell>测向站 / 时间</TableCell><TableCell>原始 → 校正方位</TableCell><TableCell>频率 / 带宽</TableCell><TableCell>信号</TableCell><TableCell>质量</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
             <TableBody>
-              {observations.map((item) => (
-                <TableRow key={item.id} hover className={item.quality === 'excluded' ? 'row-muted' : ''}>
-                  <TableCell><strong>{item.station?.station_code ?? `站点 #${item.station_id}`}</strong><br /><span className="secondary-text">{formatDateTime(item.observed_at)}</span></TableCell>
+              {observations.map((item) => {
+                const stationUnderMaintenance = activeMaintenanceStationIds.has(item.station_id)
+                return (
+                <TableRow key={item.id} hover className={item.quality === 'excluded' ? 'row-muted' : stationUnderMaintenance ? 'row-warning' : ''}>
+                  <TableCell><strong>{item.station?.station_code ?? `站点 #${item.station_id}`}</strong>{stationUnderMaintenance && <Typography component="span" variant="caption" color="warning.main" display="block">该站维护中，重跑定位将跳过</Typography>}<br /><span className="secondary-text">{formatDateTime(item.observed_at)}</span></TableCell>
                   <TableCell className="numeric">{formatDecimal(item.bearing_deg, 1)}° → <strong>{formatDecimal(item.corrected_bearing_deg, 1)}°</strong></TableCell>
                   <TableCell className="numeric">{formatFrequency(item.frequency_hz)}<br /><span className="secondary-text">BW {formatFrequency(item.bandwidth_hz)}</span></TableCell>
                   <TableCell className="numeric">{formatDecimal(item.signal_dbm, 1)} dBm</TableCell>
                   <TableCell><QualityBadge quality={item.quality} />{item.excluded_reason && <Typography variant="caption" display="block">{item.excluded_reason}</Typography>}</TableCell>
                   <TableCell align="right">{hasRole('analyst', 'admin') && item.quality !== 'excluded' && <Button size="small" color="warning" startIcon={<BlockRounded />} onClick={() => setExcludeTarget(item)}>排除</Button>}</TableCell>
                 </TableRow>
-              ))}
+                )
+              })}
               {observations.length === 0 && <TableRow><TableCell colSpan={6}>当前案例没有观测。至少录入来自两个启用站点的方位才能运行定位。</TableCell></TableRow>}
             </TableBody>
           </Table>
@@ -123,8 +141,12 @@ export function ObservationsPage() {
         <form onSubmit={(event) => void submit(event)}>
           <DialogTitle>录入离线方位观测</DialogTitle>
           <DialogContent><Stack gap={2} sx={{ pt: 1 }}>
-            <TextField select label="测向站" value={form.station_id || ''} onChange={(event) => setForm({ ...form, station_id: Number(event.target.value) })} required>
-              {stations.filter((item) => item.station_status === 'active').map((item) => <MenuItem key={item.id} value={item.id}>{item.station_code} · ±{item.accuracy_deg}°</MenuItem>)}
+            <TextField select label="测向站" value={form.station_id || ''} onChange={(event) => setForm({ ...form, station_id: Number(event.target.value) })} required
+              helperText={selectableStations.length === 0 ? '没有可录入的启用站点：可用站点均处于维护窗口' : '维护中的站点不能录入新观测'}>
+              {stations.filter((item) => item.station_status === 'active').map((item) => {
+                const underMaintenance = activeMaintenanceStationIds.has(item.id)
+                return <MenuItem key={item.id} value={item.id} disabled={underMaintenance}>{item.station_code} · ±{item.accuracy_deg}°{underMaintenance ? ' · 维护中暂停录入' : ''}</MenuItem>
+              })}
             </TextField>
             <Stack direction={{ xs: 'column', sm: 'row' }} gap={2}>
               <TextField label="原始方位（度）" type="number" inputProps={{ min: 0, max: 359.999, step: 0.1 }} value={form.bearing_deg} onChange={(event) => setForm({ ...form, bearing_deg: Number(event.target.value) })} required fullWidth />

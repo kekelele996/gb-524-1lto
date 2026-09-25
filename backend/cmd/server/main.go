@@ -41,7 +41,7 @@ func main() {
 	stationService := service.NewStationService(stationRepo)
 	observationService := service.NewObservationService(observationRepo, stationRepo, caseRepo)
 	caseService := service.NewCaseService(caseRepo)
-	estimateService := service.NewEstimateService(estimateRepo, observationRepo, caseRepo, cfg.GeometryConditionLimit)
+	estimateService := service.NewEstimateService(estimateRepo, observationRepo, caseRepo, stationRepo, cfg.GeometryConditionLimit)
 	auditService := service.NewAuditService(supportRepo)
 
 	handlers := router.Handlers{

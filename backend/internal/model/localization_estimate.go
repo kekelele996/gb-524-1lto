@@ -21,6 +21,7 @@ type LocalizationEstimate struct {
 	OutlierIDsJSON         datatypes.JSON `json:"outlier_ids_json" gorm:"type:jsonb;not null"`
 	ResidualsJSON          datatypes.JSON `json:"residuals_json" gorm:"type:jsonb;not null"`
 	InputSnapshotJSON      datatypes.JSON `json:"input_snapshot_json" gorm:"type:jsonb;not null"`
+	SkippedStationsJSON    datatypes.JSON `json:"skipped_stations_json" gorm:"type:jsonb;not null;default:'[]'"`
 	EstimateStatus         string         `json:"estimate_status" gorm:"size:24;not null;check:estimate_status IN ('complete','degenerate','outlier_candidate')"`
 	CreatedBy              uint           `json:"created_by" gorm:"not null"`
 	CreatedAt              time.Time      `json:"created_at"`

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 
@@ -90,4 +91,56 @@ func (h *StationHandler) Coverage(c *gin.Context) {
 		return
 	}
 	api.Success(c, http.StatusOK, coverage)
+}
+
+func (h *StationHandler) ListMaintenance(c *gin.Context) {
+	stationID, _ := strconv.ParseUint(c.Query("station_id"), 10, 32)
+	windows, err := h.service.ListMaintenanceWindows(c.Request.Context(), uint(stationID))
+	if err != nil {
+		api.Fail(c, err)
+		return
+	}
+	api.Success(c, http.StatusOK, windows)
+}
+
+func (h *StationHandler) CreateMaintenance(c *gin.Context) {
+	stationID, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	actor, ok := actorFromContext(c)
+	if !ok {
+		return
+	}
+	var request dto.CreateMaintenanceWindowRequest
+	if !bindJSON(c, &request) {
+		return
+	}
+	window, err := h.service.CreateMaintenanceWindow(c.Request.Context(), stationID, request, actor)
+	if err != nil {
+		api.Fail(c, err)
+		return
+	}
+	api.Success(c, http.StatusCreated, window)
+}
+
+func (h *StationHandler) UpdateMaintenance(c *gin.Context) {
+	id, ok := parseID(c, "windowId")
+	if !ok {
+		return
+	}
+	actor, ok := actorFromContext(c)
+	if !ok {
+		return
+	}
+	var request dto.UpdateMaintenanceWindowRequest
+	if !bindJSON(c, &request) {
+		return
+	}
+	window, err := h.service.UpdateMaintenanceWindow(c.Request.Context(), id, request, actor)
+	if err != nil {
+		api.Fail(c, err)
+		return
+	}
+	api.Success(c, http.StatusOK, window)
 }

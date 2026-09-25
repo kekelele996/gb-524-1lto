@@ -2,11 +2,13 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"gorm.io/gorm"
 
 	"spectrum-interference-triangulation/backend/internal/constants"
+	"spectrum-interference-triangulation/backend/internal/dto"
 	"spectrum-interference-triangulation/backend/internal/model"
 	"spectrum-interference-triangulation/backend/pkg/api"
 )
@@ -42,7 +44,14 @@ func (r *EstimateRepository) Get(ctx context.Context, id uint) (model.Localizati
 	return estimate, nil
 }
 
-func (r *EstimateRepository) CreateRun(ctx context.Context, caseID, version uint, primary *model.LocalizationEstimate, candidate *model.LocalizationEstimate, allowOutlier bool, conditionLimit float64, actor Actor) error {
+func (r *EstimateRepository) CreateRun(ctx context.Context, caseID, version uint, primary *model.LocalizationEstimate, candidate *model.LocalizationEstimate, allowOutlier bool, conditionLimit float64, skipped []dto.SkippedObservation, actor Actor) error {
+	if skipped == nil {
+		skipped = []dto.SkippedObservation{}
+	}
+	skippedJSON, err := json.Marshal(skipped)
+	if err != nil {
+		return fmt.Errorf("marshal skipped maintenance stations: %w", err)
+	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		claim := tx.Model(&model.InterferenceCase{}).
 			Where("id = ? AND version = ? AND case_status = ?", caseID, version, constants.CaseAnalyzing).
@@ -78,6 +87,7 @@ func (r *EstimateRepository) CreateRun(ctx context.Context, caseID, version uint
 			"geometry_degenerate":  primary.GeometryDegenerate,
 			"used_observation_ids": primary.UsedObservationIDsJSON,
 			"outlier_ids":          primary.OutlierIDsJSON,
+			"skipped_stations":     json.RawMessage(skippedJSON),
 		}
 		audit := NewAudit(actor, "localization_estimate.created", "interference_case", caseID, map[string]any{"version": version}, after)
 		if err := tx.Create(&audit).Error; err != nil {

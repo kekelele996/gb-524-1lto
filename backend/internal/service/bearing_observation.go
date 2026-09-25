@@ -42,6 +42,14 @@ func (s *ObservationService) Create(ctx context.Context, request dto.CreateObser
 	if station.StationStatus != "active" {
 		return model.BearingObservation{}, api.NewError(409, "STATION_NOT_ACTIVE", "只有已校准且启用的测向站可以录入观测")
 	}
+	if window, err := s.stationRepo.ActiveMaintenanceAt(ctx, station.ID, time.Now().UTC()); err != nil {
+		return model.BearingObservation{}, err
+	} else if window != nil {
+		return model.BearingObservation{}, api.WithDetails(api.NewError(409, "STATION_IN_MAINTENANCE", "测向站处于维护窗口，暂停录入新观测，窗口结束后自动恢复"), map[string]any{
+			"maintenance_window_id": window.ID,
+			"window_end_at":         window.EndAt,
+		})
+	}
 	caseRecord, err := s.caseRepo.Get(ctx, request.CaseID)
 	if err != nil {
 		return model.BearingObservation{}, err
@@ -91,6 +99,22 @@ func (s *ObservationService) ValidateCase(ctx context.Context, caseID uint) (dto
 		return dto.BatchValidationResponse{}, err
 	}
 	response := dto.BatchValidationResponse{CaseID: caseID, Items: make([]dto.ObservationValidation, 0, len(observations))}
+	maintenanceByStation := map[uint]string{}
+	{
+		stationIDs := make([]uint, 0, len(observations))
+		for _, observation := range observations {
+			if observation.Station != nil {
+				stationIDs = append(stationIDs, observation.Station.ID)
+			}
+		}
+		active, err := s.stationRepo.ActiveMaintenanceByStationIDs(ctx, stationIDs, time.Now().UTC())
+		if err != nil {
+			return dto.BatchValidationResponse{}, err
+		}
+		for stationID, window := range active {
+			maintenanceByStation[stationID] = window.EndAt.Format(time.RFC3339)
+		}
+	}
 	for _, observation := range observations {
 		item := dto.ObservationValidation{ObservationID: observation.ID, Valid: true, Issues: []string{}}
 		item.FrequencyDeltaHz = math.Abs(observation.FrequencyHz - caseRecord.FrequencyCenterHz)
@@ -101,6 +125,9 @@ func (s *ObservationService) ValidateCase(ctx context.Context, caseID uint) (dto
 		if observation.Station == nil || observation.Station.StationStatus != "active" {
 			item.Valid = false
 			item.Issues = append(item.Issues, "测向站未处于启用状态")
+		} else if endsAt, underMaintenance := maintenanceByStation[observation.Station.ID]; underMaintenance {
+			item.Valid = false
+			item.Issues = append(item.Issues, "测向站维护中，重跑定位将跳过该观测（窗口结束 "+formatValidationWindowEnd(endsAt)+"）")
 		}
 		if item.FrequencyDeltaHz > observation.BandwidthHz/2 {
 			item.Valid = false
@@ -132,4 +159,13 @@ func normalizeBearing(value float64) float64 {
 		value += 360
 	}
 	return value
+}
+
+// formatValidationWindowEnd 仅用于校验证据展示，解析失败时回退为原始字符串。
+func formatValidationWindowEnd(value string) string {
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		return value
+	}
+	return parsed.Local().Format("2006-01-02 15:04")
 }

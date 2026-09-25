@@ -37,6 +37,7 @@ docker compose down -v --remove-orphans
 ## 主要功能
 
 - 维护 WGS84 测向站坐标、天线偏置、精度和校准状态；原始方位与偏置校正方位同时保留。
+- 测向站维护窗口：窗口生效时该站不能录入新观测（`STATION_IN_MAINTENANCE`）、不参与新定位；已有观测和定位结果原样保留，重跑定位自动跳过维护站并在定位页逐站列出跳过原因与窗口结束时间。同一站点重叠窗口不能保存（端点相接允许），窗口结束后站点按当前时刻自动恢复，无需改站点状态；维护登记、修改与定位跳过均写入不可变审计。
 - 按案例录入频率、带宽、信号强度和质量，批量校验频率匹配与站点状态，排除操作保留原因和审计。
 - 在本地笛卡尔坐标图中显示测向站、方位射线、估计点、不确定区域、逐站残差和离群证据。
 - 二站几何交汇和三站以上加权最小二乘使用同一确定性求解器；近平行或近共线几何明确拒绝，不返回伪精确点。
@@ -97,6 +98,9 @@ docker compose down -v --remove-orphans
 | `GET/POST` | `/api/v1/stations` | 测向站列表与登记 |
 | `GET/PUT` | `/api/v1/stations/:id` | 站点详情与校准更新 |
 | `GET` | `/api/v1/stations/:id/coverage` | 站点观测覆盖 |
+| `GET` | `/api/v1/maintenance-windows` | 维护窗口列表（可按 `station_id` 过滤，附带推导状态） |
+| `POST` | `/api/v1/stations/:id/maintenance-windows` | 为站点登记维护窗口，同站重叠窗口返回冲突 |
+| `PUT` | `/api/v1/maintenance-windows/:windowId` | 修改维护窗口；生效中只能改结束时间/原因，已结束锁定 |
 | `GET/POST` | `/api/v1/observations` | 观测列表与录入 |
 | `POST` | `/api/v1/observations/:id/exclude` | 保存原因并排除观测 |
 | `GET` | `/api/v1/cases/:id/validate-observations` | 批量校验案例观测 |
@@ -123,6 +127,15 @@ docker compose down -v --remove-orphans
 - 后端常量和状态机：`backend/internal/constants/case.go`
 - DTO、repository、service、handler、router：`backend/internal/dto/interference_case.go`、`backend/internal/repository/interference_case.go`、`backend/internal/service/interference_case.go`、`backend/internal/handler/interference_case.go`、`backend/internal/router/router.go`
 - 前端类型、API、store、复核组件、页面：`frontend/src/types/case.ts`、`frontend/src/api/cases.ts`、`frontend/src/stores/caseStore.ts`、`frontend/src/components/common/ReviewDecisionDialog.tsx`、`frontend/src/pages/CasesPage.tsx`、`frontend/src/pages/AuditPage.tsx`
+
+`MaintenanceWindowStatus = upcoming | active | ended`（由窗口起止时间与当前时刻推导，不入库；窗口结束自动恢复）：
+
+- model、数据库约束（同站时间索引、`end_at > start_at` 检查）、状态推导与重叠判定及单测：`backend/internal/model/receiver_station.go`、`backend/internal/model/receiver_station_test.go`
+- DTO（含定位跳过证据 `SkippedObservation`）：`backend/internal/dto/receiver_station.go`
+- repository、service、handler：维护窗口是 `ReceiverStation` 子实体，与站点同文件维护：`backend/internal/repository/receiver_station.go`、`backend/internal/service/receiver_station.go`、`backend/internal/handler/receiver_station.go`
+- 路由：`backend/internal/router/router.go`
+- 录入拦截：`backend/internal/service/bearing_observation.go`；定位跳过与跳过原因持久化：`backend/internal/service/localization_estimate.go`、`backend/internal/repository/localization_estimate.go`（`skipped_stations_json`）
+- 前端类型、API、store、共享组件、页面：`frontend/src/types/maintenance.ts`、`frontend/src/api/maintenance.ts`、`frontend/src/stores/maintenanceStore.ts`、`frontend/src/components/common/MaintenanceStatusBadge.tsx`、`frontend/src/components/common/MaintenanceDialog.tsx`、`frontend/src/pages/StationsPage.tsx`、`frontend/src/pages/ObservationsPage.tsx`、`frontend/src/pages/LocalizationPage.tsx`
 
 ## 定位算法与假设
 
@@ -187,6 +200,9 @@ npm --prefix frontend run build
 - 后端未 healthy：执行 `docker compose logs backend`，检查 JWT 长度、数据库密码和 PostgreSQL 健康状态。
 - 定位返回 `FREQUENCY_MISMATCH`：确认每条观测与案例中心频率的偏差不超过该观测带宽的一半。
 - 定位返回 `GEOMETRY_DEGENERATE`：增加不同方位几何的测向站，不能通过放宽显示精度规避退化证据。
+- 录入观测返回 `STATION_IN_MAINTENANCE`：该测向站正处于维护窗口，窗口结束后自动恢复；维护期间已有观测和定位结果保留不变。
+- 保存维护窗口返回 `MAINTENANCE_WINDOW_OVERLAP`：同一站点已有时间重叠的窗口，请调整起止时间（端点相接的连续分段允许保存）。
+- 重跑定位提示维护站点被跳过：属预期行为，定位页“维护站点跳过说明”会逐站列出原因和窗口结束时间，证据同时写入定位结果与审计。
 - 状态迁移返回 `CASE_VERSION_CONFLICT`：其他请求已更新案例，刷新列表后使用新 version 重试。
 - 登录后出现 401：清除当前标签页 `sessionStorage` 后重新登录；令牌不会持久化到其他浏览器会话。
 

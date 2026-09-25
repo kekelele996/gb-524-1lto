@@ -9,6 +9,7 @@ import { useAuth } from '../hooks/useAuth'
 import { useLocalizationRun } from '../hooks/useLocalizationRun'
 import { useCaseStore } from '../stores/caseStore'
 import { useLocalizationStore } from '../stores/localizationStore'
+import { useMaintenanceStore } from '../stores/maintenanceStore'
 import { useObservationStore } from '../stores/observationStore'
 import { useStationStore } from '../stores/stationStore'
 import type { LocalizationEstimate } from '../types/localization'
@@ -20,6 +21,8 @@ export function LocalizationPage() {
   const loadCases = useCaseStore((state) => state.load)
   const stations = useStationStore((state) => state.stations)
   const loadStations = useStationStore((state) => state.load)
+  const windows = useMaintenanceStore((state) => state.windows)
+  const loadWindows = useMaintenanceStore((state) => state.load)
   const observations = useObservationStore((state) => state.observations)
   const loadObservations = useObservationStore((state) => state.load)
   const estimates = useLocalizationStore((state) => state.estimates)
@@ -31,8 +34,8 @@ export function LocalizationPage() {
   const [allowOutlier, setAllowOutlier] = useState(true)
 
   useEffect(() => {
-    void Promise.all([loadCases(), loadStations()])
-  }, [loadCases, loadStations])
+    void Promise.all([loadCases(), loadStations(), loadWindows()])
+  }, [loadCases, loadStations, loadWindows])
 
   useEffect(() => {
     if (!caseId) {
@@ -47,7 +50,19 @@ export function LocalizationPage() {
 
   const selectedCase = cases.find((item) => item.id === caseId)
   const residuals = selected?.residuals_json ?? []
+  const skipped = selected?.skipped_stations_json ?? lastResult?.skipped ?? []
   const observationById = useMemo(() => new Map(observations.map((item) => [item.id, item])), [observations])
+  const activeMaintenanceStationIds = useMemo(() => {
+    const ids = new Set<number>()
+    for (const window of windows) {
+      if (window.status === 'active') ids.add(window.station_id)
+    }
+    return ids
+  }, [windows])
+  const pendingSkippedObservations = useMemo(
+    () => observations.filter((item) => activeMaintenanceStationIds.has(item.station_id)),
+    [observations, activeMaintenanceStationIds]
+  )
 
   const run = async () => {
     if (!caseId) return
@@ -73,6 +88,36 @@ export function LocalizationPage() {
       </section>
 
       <Alert severity="info" icon={<ScienceRounded />} className="safety-alert">估计坐标、不确定半径和离群候选均为离线模型证据，必须与原始方位线和残差共同复核。</Alert>
+
+      {(skipped.length > 0 || pendingSkippedObservations.length > 0) && (
+        <section className="data-section" aria-labelledby="maintenance-skip-title">
+          <Typography id="maintenance-skip-title" component="h2" variant="h6" mb={1}>维护站点跳过说明</Typography>
+          <Typography variant="body2" color="text.secondary" mb={2}>
+            {selected ? `以下观测在运行 #${selected.id} 时因测向站处于维护窗口被跳过，未参与本次定位；原因已随定位结果与审计保存。` : '当前案例中以下观测所属测向站正在维护，重跑定位会自动跳过。'}
+          </Typography>
+          <Box className="table-scroll">
+            <Table size="small" aria-label="维护站点跳过原因">
+              <TableHead><TableRow><TableCell>观测 / 测向站</TableCell><TableCell>跳过原因</TableCell><TableCell>窗口结束时间</TableCell></TableRow></TableHead>
+              <TableBody>
+                {skipped.map((item) => (
+                  <TableRow key={`stored-${item.observation_id}`} className="row-warning">
+                    <TableCell><strong>#{item.observation_id}</strong> · {item.station_code}</TableCell>
+                    <TableCell>{item.reason}</TableCell>
+                    <TableCell>{formatDateTime(item.window_ends_at)}</TableCell>
+                  </TableRow>
+                ))}
+                {!selected && pendingSkippedObservations.map((item) => (
+                  <TableRow key={`pending-${item.id}`} className="row-warning">
+                    <TableCell><strong>#{item.id}</strong> · {item.station?.station_code ?? `站点 #${item.station_id}`}</TableCell>
+                    <TableCell>测向站处于维护窗口，重跑定位将跳过该观测，窗口结束后自动恢复</TableCell>
+                    <TableCell>{formatDateTime(windows.find((window) => window.status === 'active' && window.station_id === item.station_id)?.end_at)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Box>
+        </section>
+      )}
 
       <section className="localization-grid">
         <div className="plot-section plot-primary">

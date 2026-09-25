@@ -17,6 +17,14 @@ export interface LocalizationInputSnapshot {
   quality_weight: number
 }
 
+export interface SkippedObservation {
+  observation_id: number
+  station_id: number
+  station_code: string
+  reason: string
+  window_ends_at: string
+}
+
 export interface LocalizationEstimate {
   id: number
   case_id: number
@@ -32,6 +40,7 @@ export interface LocalizationEstimate {
   outlier_ids_json: number[]
   residuals_json: ResidualEvidence[]
   input_snapshot_json: LocalizationInputSnapshot[]
+  skipped_stations_json: SkippedObservation[] | null
   estimate_status: 'complete' | 'degenerate' | 'outlier_candidate'
   created_by: number
   created_at: string
@@ -40,5 +49,6 @@ export interface LocalizationEstimate {
 export interface LocalizationRunResult {
   primary: LocalizationEstimate
   candidate?: LocalizationEstimate
+  skipped: SkippedObservation[]
 }
 
