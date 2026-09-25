@@ -14,13 +14,14 @@ import (
 )
 
 type ObservationService struct {
-	repo        *repository.ObservationRepository
-	stationRepo *repository.StationRepository
-	caseRepo    *repository.CaseRepository
+	repo            *repository.ObservationRepository
+	stationRepo     *repository.StationRepository
+	caseRepo        *repository.CaseRepository
+	maintenanceRepo *repository.MaintenanceRepository
 }
 
-func NewObservationService(repo *repository.ObservationRepository, stationRepo *repository.StationRepository, caseRepo *repository.CaseRepository) *ObservationService {
-	return &ObservationService{repo: repo, stationRepo: stationRepo, caseRepo: caseRepo}
+func NewObservationService(repo *repository.ObservationRepository, stationRepo *repository.StationRepository, caseRepo *repository.CaseRepository, maintenanceRepo *repository.MaintenanceRepository) *ObservationService {
+	return &ObservationService{repo: repo, stationRepo: stationRepo, caseRepo: caseRepo, maintenanceRepo: maintenanceRepo}
 }
 
 func (s *ObservationService) List(ctx context.Context, filter repository.ObservationFilter) ([]model.BearingObservation, int64, error) {
@@ -41,6 +42,9 @@ func (s *ObservationService) Create(ctx context.Context, request dto.CreateObser
 	}
 	if station.StationStatus != "active" {
 		return model.BearingObservation{}, api.NewError(409, "STATION_NOT_ACTIVE", "只有已校准且启用的测向站可以录入观测")
+	}
+	if err := rejectStationInMaintenance(ctx, s.maintenanceRepo, station.ID, station.StationCode); err != nil {
+		return model.BearingObservation{}, err
 	}
 	caseRecord, err := s.caseRepo.Get(ctx, request.CaseID)
 	if err != nil {
@@ -91,6 +95,16 @@ func (s *ObservationService) ValidateCase(ctx context.Context, caseID uint) (dto
 		return dto.BatchValidationResponse{}, err
 	}
 	response := dto.BatchValidationResponse{CaseID: caseID, Items: make([]dto.ObservationValidation, 0, len(observations))}
+	stationIDs := make([]uint, 0, len(observations))
+	for _, observation := range observations {
+		if observation.Station != nil {
+			stationIDs = append(stationIDs, observation.StationID)
+		}
+	}
+	activeWindows, err := s.maintenanceRepo.ActiveForStations(ctx, stationIDs, time.Now().UTC())
+	if err != nil {
+		return dto.BatchValidationResponse{}, err
+	}
 	for _, observation := range observations {
 		item := dto.ObservationValidation{ObservationID: observation.ID, Valid: true, Issues: []string{}}
 		item.FrequencyDeltaHz = math.Abs(observation.FrequencyHz - caseRecord.FrequencyCenterHz)
@@ -101,6 +115,9 @@ func (s *ObservationService) ValidateCase(ctx context.Context, caseID uint) (dto
 		if observation.Station == nil || observation.Station.StationStatus != "active" {
 			item.Valid = false
 			item.Issues = append(item.Issues, "测向站未处于启用状态")
+		} else if window, ok := activeWindows[observation.StationID]; ok {
+			item.Valid = false
+			item.Issues = append(item.Issues, "测向站处于维护窗口："+window.Reason)
 		}
 		if item.FrequencyDeltaHz > observation.BandwidthHz/2 {
 			item.Valid = false
@@ -132,4 +149,24 @@ func normalizeBearing(value float64) float64 {
 		value += 360
 	}
 	return value
+}
+
+// rejectStationInMaintenance 在站点处于生效维护窗口时返回 409，
+// 阻止窗口期间录入新观测；窗口结束（end_at 到达）后该检查自动放行。
+func rejectStationInMaintenance(ctx context.Context, maintenanceRepo *repository.MaintenanceRepository, stationID uint, stationCode string) error {
+	window, err := maintenanceRepo.ActiveForStation(ctx, stationID, time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	if window == nil {
+		return nil
+	}
+	return api.WithDetails(api.NewError(409, "STATION_IN_MAINTENANCE", "测向站处于维护窗口，暂不能录入新观测"), map[string]any{
+		"station_id":            stationID,
+		"station_code":          stationCode,
+		"maintenance_window_id": window.ID,
+		"start_at":              window.StartAt.UTC().Format(time.RFC3339),
+		"end_at":                window.EndAt.UTC().Format(time.RFC3339),
+		"reason":                window.Reason,
+	})
 }

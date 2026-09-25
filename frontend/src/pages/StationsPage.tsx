@@ -1,13 +1,16 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import AddRounded from '@mui/icons-material/AddRounded'
 import CalibrationRounded from '@mui/icons-material/CompassCalibrationRounded'
-import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from '@mui/material'
+import BuildRounded from '@mui/icons-material/BuildRounded'
+import { Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from '@mui/material'
 import { BearingPlot } from '../components/common/BearingPlot'
+import { MaintenanceDialog } from '../components/common/MaintenanceDialog'
 import { PageHeader } from '../components/common/PageHeader'
 import { useAuth } from '../hooks/useAuth'
+import { useMaintenanceStore } from '../stores/maintenanceStore'
 import { useObservationStore } from '../stores/observationStore'
 import { useStationStore } from '../stores/stationStore'
-import type { StationInput } from '../types/station'
+import type { ReceiverStation, StationInput } from '../types/station'
 import { formatCoordinate, formatDateTime, formatDecimal } from '../utils/format'
 
 const initialStation: StationInput = {
@@ -23,15 +26,33 @@ export function StationsPage() {
   const busy = useStationStore((state) => state.busy)
   const observations = useObservationStore((state) => state.observations)
   const loadObservations = useObservationStore((state) => state.load)
+  const windows = useMaintenanceStore((state) => state.windows)
+  const loadWindows = useMaintenanceStore((state) => state.load)
   const [open, setOpen] = useState(false)
+  const [maintenanceStation, setMaintenanceStation] = useState<ReceiverStation | null>(null)
   const [form, setForm] = useState<StationInput>(initialStation)
   const [saving, setSaving] = useState(false)
+  const canManage = hasRole('analyst', 'admin')
 
   useEffect(() => {
-    void Promise.all([loadStations(), loadObservations()])
-  }, [loadStations, loadObservations])
+    void Promise.all([loadStations(), loadObservations(), loadWindows()])
+  }, [loadStations, loadObservations, loadWindows])
 
-  const activeCount = useMemo(() => stations.filter((station) => station.station_status === 'active').length, [stations])
+  const activeWindowByStation = useMemo(() => {
+    const map = new Map<number, (typeof windows)[number]>()
+    const now = Date.now()
+    for (const window of windows) {
+      const start = new Date(window.start_at).getTime()
+      const end = new Date(window.end_at).getTime()
+      if (now >= start && now < end) map.set(window.station_id, window)
+    }
+    return map
+  }, [windows])
+
+  const usableCount = useMemo(
+    () => stations.filter((station) => station.station_status === 'active' && !activeWindowByStation.has(station.id)).length,
+    [stations, activeWindowByStation]
+  )
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -50,8 +71,8 @@ export function StationsPage() {
       <PageHeader
         eyebrow="RECEIVER GEOMETRY / CALIBRATION"
         title="测向站与观测覆盖"
-        summary={`${stations.length} 个测向站 · ${activeCount} 个可参与定位 · 坐标仅用于离线局部平面计算`}
-        actions={hasRole('analyst', 'admin') ? <Button variant="contained" startIcon={<AddRounded />} onClick={() => setOpen(true)}>登记测向站</Button> : undefined}
+        summary={`${stations.length} 个测向站 · ${usableCount} 个当前可用 · 坐标仅用于离线局部平面计算`}
+        actions={canManage ? <Button variant="contained" startIcon={<AddRounded />} onClick={() => setOpen(true)}>登记测向站</Button> : undefined}
       />
 
       <section className="plot-section">
@@ -61,22 +82,33 @@ export function StationsPage() {
       <section className="data-section" aria-labelledby="station-table-title">
         <Stack direction="row" justifyContent="space-between" alignItems="baseline" mb={2}>
           <Typography id="station-table-title" component="h2" variant="h6">站点校准台账</Typography>
-          <Typography variant="body2" color="text.secondary">天线偏置在保存观测时写入校正方位</Typography>
+          <Typography variant="body2" color="text.secondary">天线偏置在保存观测时写入校正方位；维护窗口期间不录入、不参与定位</Typography>
         </Stack>
         <Box className="table-scroll">
           <Table size="small" aria-label="测向站列表">
-            <TableHead><TableRow><TableCell>站点</TableCell><TableCell>WGS84 坐标</TableCell><TableCell>精度 / 偏置</TableCell><TableCell>状态</TableCell><TableCell>最近校准</TableCell></TableRow></TableHead>
+            <TableHead><TableRow><TableCell>站点</TableCell><TableCell>WGS84 坐标</TableCell><TableCell>精度 / 偏置</TableCell><TableCell>状态</TableCell><TableCell>最近校准</TableCell><TableCell align="right">维护窗口</TableCell></TableRow></TableHead>
             <TableBody>
-              {stations.map((station) => (
-                <TableRow key={station.id} hover>
-                  <TableCell><strong>{station.station_code}</strong><br /><span className="secondary-text">{station.name}</span></TableCell>
-                  <TableCell className="numeric">{formatCoordinate(station.latitude)}<br />{formatCoordinate(station.longitude)}</TableCell>
-                  <TableCell className="numeric">±{formatDecimal(station.accuracy_deg, 1)}° / {station.antenna_bias_deg >= 0 ? '+' : ''}{formatDecimal(station.antenna_bias_deg, 1)}°</TableCell>
-                  <TableCell><span className={`status-text status-${station.station_status}`}>{station.station_status === 'active' ? '● 已启用' : station.station_status === 'calibration_due' ? '△ 待校准' : '○ 已停用'}</span></TableCell>
-                  <TableCell>{formatDateTime(station.calibrated_at)}</TableCell>
-                </TableRow>
-              ))}
-              {!busy && stations.length === 0 && <TableRow><TableCell colSpan={5}>尚无测向站。登记并校准站点后才能录入方位观测。</TableCell></TableRow>}
+              {stations.map((station) => {
+                const activeWindow = activeWindowByStation.get(station.id)
+                return (
+                  <TableRow key={station.id} hover className={activeWindow ? 'row-warning' : ''}>
+                    <TableCell><strong>{station.station_code}</strong><br /><span className="secondary-text">{station.name}</span></TableCell>
+                    <TableCell className="numeric">{formatCoordinate(station.latitude)}<br />{formatCoordinate(station.longitude)}</TableCell>
+                    <TableCell className="numeric">±{formatDecimal(station.accuracy_deg, 1)}° / {station.antenna_bias_deg >= 0 ? '+' : ''}{formatDecimal(station.antenna_bias_deg, 1)}°</TableCell>
+                    <TableCell>
+                      <span className={`status-text status-${station.station_status}`}>{station.station_status === 'active' ? '● 已启用' : station.station_status === 'calibration_due' ? '△ 待校准' : '○ 已停用'}</span>
+                      {activeWindow && <><br /><Chip size="small" color="warning" label="● 维护中" sx={{ mt: 0.5 }} /></>}
+                    </TableCell>
+                    <TableCell>{formatDateTime(station.calibrated_at)}</TableCell>
+                    <TableCell align="right">
+                      <Button size="small" startIcon={<BuildRounded />} color={activeWindow ? 'warning' : 'inherit'} onClick={() => setMaintenanceStation(station)}>
+                        {activeWindow ? `至 ${formatDateTime(activeWindow.end_at)}` : '登记 / 查看'}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+              {!busy && stations.length === 0 && <TableRow><TableCell colSpan={6}>尚无测向站。登记并校准站点后才能录入方位观测。</TableCell></TableRow>}
             </TableBody>
           </Table>
         </Box>
@@ -108,6 +140,8 @@ export function StationsPage() {
           <DialogActions><Button onClick={() => setOpen(false)} disabled={saving}>继续查看</Button><Button type="submit" variant="contained" startIcon={<CalibrationRounded />} disabled={saving}>保存校准站点</Button></DialogActions>
         </form>
       </Dialog>
+
+      <MaintenanceDialog station={maintenanceStation} canManage={canManage} onClose={() => setMaintenanceStation(null)} />
     </>
   )
 }

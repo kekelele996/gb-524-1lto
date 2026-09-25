@@ -41,6 +41,7 @@ export function AuditPage() {
       const observation = observationById.get(event.entity_id)
       return observation ? `观测 #${observation.id} / 站点 ${observation.station?.station_code ?? observation.station_id}` : `观测 #${event.entity_id}`
     }
+    if (event.entity_type === 'maintenance_window') return `维护窗口 #${event.entity_id}`
     return `${event.entity_type} #${event.entity_id}`
   }
 

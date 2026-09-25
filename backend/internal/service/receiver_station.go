@@ -104,3 +104,91 @@ func validateCoordinates(latitude, longitude float64) error {
 	}
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// 测向站维护窗口服务：登记/修改窗口，窗口结束后站点自动恢复使用
+// ---------------------------------------------------------------------------
+
+const maintenanceMinDuration = time.Minute
+
+type MaintenanceService struct {
+	repo        *repository.MaintenanceRepository
+	stationRepo *repository.StationRepository
+}
+
+func NewMaintenanceService(repo *repository.MaintenanceRepository, stationRepo *repository.StationRepository) *MaintenanceService {
+	return &MaintenanceService{repo: repo, stationRepo: stationRepo}
+}
+
+func (s *MaintenanceService) List(ctx context.Context, stationID uint, page, pageSize int) ([]model.MaintenanceWindow, int64, error) {
+	if stationID > 0 {
+		if _, err := s.stationRepo.Get(ctx, stationID); err != nil {
+			return nil, 0, err
+		}
+	}
+	return s.repo.List(ctx, stationID, page, pageSize)
+}
+
+func (s *MaintenanceService) Get(ctx context.Context, id uint) (model.MaintenanceWindow, error) {
+	return s.repo.Get(ctx, id)
+}
+
+func (s *MaintenanceService) Register(ctx context.Context, request dto.CreateMaintenanceWindowRequest, actor repository.Actor) (model.MaintenanceWindow, error) {
+	startAt := request.StartAt.UTC()
+	endAt := request.EndAt.UTC()
+	if err := validateWindowRange(startAt, endAt); err != nil {
+		return model.MaintenanceWindow{}, err
+	}
+	// 允许登记立即开始的窗口，但登记时窗口必须尚未结束，结束后站点自动恢复。
+	if !endAt.After(time.Now().UTC()) {
+		return model.MaintenanceWindow{}, api.NewError(422, "MAINTENANCE_WINDOW_INVALID", "维护结束时间必须晚于当前时间")
+	}
+	if _, err := s.stationRepo.Get(ctx, request.StationID); err != nil {
+		return model.MaintenanceWindow{}, err
+	}
+	window := model.MaintenanceWindow{
+		StationID: request.StationID, StartAt: startAt, EndAt: endAt,
+		Reason: strings.TrimSpace(request.Reason), CreatedBy: actor.UserID,
+	}
+	if err := s.repo.Create(ctx, &window, actor); err != nil {
+		return model.MaintenanceWindow{}, err
+	}
+	return window, nil
+}
+
+func (s *MaintenanceService) Update(ctx context.Context, id uint, request dto.UpdateMaintenanceWindowRequest, actor repository.Actor) (model.MaintenanceWindow, error) {
+	before, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return model.MaintenanceWindow{}, err
+	}
+	startAt := request.StartAt.UTC()
+	endAt := request.EndAt.UTC()
+	if err := validateWindowRange(startAt, endAt); err != nil {
+		return model.MaintenanceWindow{}, err
+	}
+	// 已结束的窗口属于历史记录，不能再修改，保证审计与定位跳过证据可追溯。
+	if !before.EndAt.UTC().After(time.Now().UTC()) {
+		return model.MaintenanceWindow{}, api.NewError(409, "MAINTENANCE_WINDOW_CLOSED", "维护窗口已结束，历史记录不能修改")
+	}
+	if !endAt.After(time.Now().UTC()) {
+		return model.MaintenanceWindow{}, api.NewError(422, "MAINTENANCE_WINDOW_INVALID", "维护结束时间必须晚于当前时间")
+	}
+	updated := before
+	updated.StartAt = startAt
+	updated.EndAt = endAt
+	updated.Reason = strings.TrimSpace(request.Reason)
+	if err := s.repo.Update(ctx, &updated, actor); err != nil {
+		return model.MaintenanceWindow{}, err
+	}
+	return updated, nil
+}
+
+func validateWindowRange(startAt, endAt time.Time) error {
+	if !endAt.After(startAt) {
+		return api.NewError(422, "MAINTENANCE_WINDOW_INVALID", "维护结束时间必须晚于开始时间")
+	}
+	if endAt.Sub(startAt) < maintenanceMinDuration {
+		return api.NewError(422, "MAINTENANCE_WINDOW_INVALID", "维护窗口时长不能少于 1 分钟")
+	}
+	return nil
+}

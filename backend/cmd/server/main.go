@@ -36,17 +36,20 @@ func main() {
 	caseRepo := repository.NewCaseRepository(db)
 	estimateRepo := repository.NewEstimateRepository(db)
 	supportRepo := repository.NewSupportRepository(db)
+	maintenanceRepo := repository.NewMaintenanceRepository(db)
 
 	authService := service.NewAuthService(supportRepo, cfg.JWTSecret)
 	stationService := service.NewStationService(stationRepo)
-	observationService := service.NewObservationService(observationRepo, stationRepo, caseRepo)
+	maintenanceService := service.NewMaintenanceService(maintenanceRepo, stationRepo)
+	observationService := service.NewObservationService(observationRepo, stationRepo, caseRepo, maintenanceRepo)
 	caseService := service.NewCaseService(caseRepo)
-	estimateService := service.NewEstimateService(estimateRepo, observationRepo, caseRepo, cfg.GeometryConditionLimit)
+	estimateService := service.NewEstimateService(estimateRepo, observationRepo, caseRepo, maintenanceRepo, cfg.GeometryConditionLimit)
 	auditService := service.NewAuditService(supportRepo)
 
 	handlers := router.Handlers{
 		Support:     handler.NewSupportHandler(authService, auditService),
 		Station:     handler.NewStationHandler(stationService),
+		Maintenance: handler.NewMaintenanceHandler(maintenanceService),
 		Observation: handler.NewObservationHandler(observationService),
 		Case:        handler.NewCaseHandler(caseService),
 		Estimate:    handler.NewEstimateHandler(estimateService),

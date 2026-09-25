@@ -28,3 +28,35 @@ type StationCoverage struct {
 	ObservationCount int64      `json:"observation_count"`
 	LastObservedAt   *time.Time `json:"last_observed_at"`
 }
+
+type CreateMaintenanceWindowRequest struct {
+	StationID uint       `json:"station_id" binding:"required"`
+	StartAt   *time.Time `json:"start_at" binding:"required"`
+	EndAt     *time.Time `json:"end_at" binding:"required"`
+	Reason    string     `json:"reason" binding:"required,min=2,max=500"`
+}
+
+type UpdateMaintenanceWindowRequest struct {
+	StartAt *time.Time `json:"start_at" binding:"required"`
+	EndAt   *time.Time `json:"end_at" binding:"required"`
+	Reason  string     `json:"reason" binding:"required,min=2,max=500"`
+}
+
+// SkippedStation 记录一次定位运行中被跳过的观测及原因，
+// 随定位结果持久化并在定位页展示。
+type SkippedStation struct {
+	ObservationID       uint       `json:"observation_id"`
+	StationID           uint       `json:"station_id"`
+	StationCode         string     `json:"station_code"`
+	ReasonCode          string     `json:"reason_code"`
+	Reason              string     `json:"reason"`
+	MaintenanceWindowID *uint      `json:"maintenance_window_id,omitempty"`
+	MaintenanceStartAt  *time.Time `json:"maintenance_start_at,omitempty"`
+	MaintenanceEndAt    *time.Time `json:"maintenance_end_at,omitempty"`
+	MaintenanceReason   string     `json:"maintenance_reason,omitempty"`
+}
+
+const (
+	SkipReasonMaintenance = "station_in_maintenance"
+	SkipReasonInactive    = "station_not_active"
+)

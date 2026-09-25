@@ -105,6 +105,7 @@ func migrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&model.User{},
 		&model.ReceiverStation{},
+		&model.MaintenanceWindow{},
 		&model.InterferenceCase{},
 		&model.BearingObservation{},
 		&model.LocalizationEstimate{},

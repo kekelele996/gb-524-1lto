@@ -1,3 +1,5 @@
+import type { SkippedStation } from './maintenance'
+
 export interface ResidualEvidence {
   observation_id: number
   station_code: string
@@ -32,6 +34,7 @@ export interface LocalizationEstimate {
   outlier_ids_json: number[]
   residuals_json: ResidualEvidence[]
   input_snapshot_json: LocalizationInputSnapshot[]
+  skipped_stations_json: SkippedStation[]
   estimate_status: 'complete' | 'degenerate' | 'outlier_candidate'
   created_by: number
   created_at: string

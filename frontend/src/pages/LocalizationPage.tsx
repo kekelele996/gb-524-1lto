@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded'
 import ScienceRounded from '@mui/icons-material/ScienceRounded'
+import BuildRounded from '@mui/icons-material/BuildRounded'
 import { Alert, Box, Button, FormControlLabel, MenuItem, Stack, Switch, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from '@mui/material'
 import { BearingPlot } from '../components/common/BearingPlot'
 import { PageHeader } from '../components/common/PageHeader'
@@ -92,6 +93,27 @@ export function LocalizationPage() {
           <Typography id="residual-title" component="h2" variant="h6">逐站角度残差</Typography>
           {selected && <Typography variant="body2" color="text.secondary">算法 {selected.algorithm_version} · 创建于 {formatDateTime(selected.created_at)}</Typography>}
         </Stack>
+        {selected && selected.skipped_stations_json.length > 0 && (
+          <Alert severity="warning" className="skip-alert" icon={<BuildRounded />}>
+            <Typography variant="subtitle2">本次重跑跳过 {selected.skipped_stations_json.length} 个站点观测（已有观测原样保留）：</Typography>
+            <Table size="small" aria-label="维护与停用站点跳过原因">
+              <TableHead><TableRow><TableCell>观测 / 测向站</TableCell><TableCell>跳过原因</TableCell><TableCell>维护窗口</TableCell></TableRow></TableHead>
+              <TableBody>
+                {selected.skipped_stations_json.map((skip) => (
+                  <TableRow key={skip.observation_id} className="row-warning">
+                    <TableCell><strong>#{skip.observation_id}</strong> · {skip.station_code}</TableCell>
+                    <TableCell>{skip.reason_code === 'station_in_maintenance' ? '● 维护窗口生效' : '○ 站点未启用'}<br /><span className="secondary-text">{skip.reason}</span></TableCell>
+                    <TableCell>
+                      {skip.reason_code === 'station_in_maintenance'
+                        ? <>{formatDateTime(skip.maintenance_start_at)} → {formatDateTime(skip.maintenance_end_at)}<br /><span className="secondary-text">{skip.maintenance_reason}</span></>
+                        : '—'}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Alert>
+        )}
         <Box className="table-scroll">
           <Table size="small" aria-label="定位残差证据">
             <TableHead><TableRow><TableCell>观测 / 测向站</TableCell><TableCell>观测方位</TableCell><TableCell>预测方位</TableCell><TableCell>角度残差</TableCell><TableCell>标准化残差</TableCell><TableCell>质量</TableCell></TableRow></TableHead>

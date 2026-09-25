@@ -16,6 +16,7 @@ import (
 type Handlers struct {
 	Support     *handler.SupportHandler
 	Station     *handler.StationHandler
+	Maintenance *handler.MaintenanceHandler
 	Observation *handler.ObservationHandler
 	Case        *handler.CaseHandler
 	Estimate    *handler.EstimateHandler
@@ -46,6 +47,11 @@ func New(log *slog.Logger, authService *service.AuthService, handlers Handlers, 
 	protected.GET("/stations/:id/coverage", handlers.Station.Coverage)
 	protected.POST("/stations", middleware.RBAC(constants.RoleAnalyst, constants.RoleAdmin), handlers.Station.Create)
 	protected.PUT("/stations/:id", middleware.RBAC(constants.RoleAnalyst, constants.RoleAdmin), handlers.Station.Update)
+
+	protected.GET("/maintenance-windows", handlers.Maintenance.List)
+	protected.GET("/maintenance-windows/:id", handlers.Maintenance.Get)
+	protected.POST("/maintenance-windows", middleware.RBAC(constants.RoleAnalyst, constants.RoleAdmin), handlers.Maintenance.Register)
+	protected.PUT("/maintenance-windows/:id", middleware.RBAC(constants.RoleAnalyst, constants.RoleAdmin), handlers.Maintenance.Update)
 
 	protected.GET("/observations", handlers.Observation.List)
 	protected.GET("/observations/:id", handlers.Observation.Get)

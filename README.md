@@ -37,6 +37,8 @@ docker compose down -v --remove-orphans
 ## 主要功能
 
 - 维护 WGS84 测向站坐标、天线偏置、精度和校准状态；原始方位与偏置校正方位同时保留。
+- 为测向站登记维护窗口（开始/结束时间与原因）：窗口生效期间不能录入新观测、不参与新定位；已有观测和定位结果原样保留。重叠窗口不能保存，窗口结束后站点按自身状态自动恢复。
+- 重跑定位时自动跳过维护站（及非启用站点），跳过原因随定位结果持久化（`skipped_stations_json`）并在定位页列出；登记、修改与每次跳过均写入不可变审计。
 - 按案例录入频率、带宽、信号强度和质量，批量校验频率匹配与站点状态，排除操作保留原因和审计。
 - 在本地笛卡尔坐标图中显示测向站、方位射线、估计点、不确定区域、逐站残差和离群证据。
 - 二站几何交汇和三站以上加权最小二乘使用同一确定性求解器；近平行或近共线几何明确拒绝，不返回伪精确点。
@@ -97,9 +99,11 @@ docker compose down -v --remove-orphans
 | `GET/POST` | `/api/v1/stations` | 测向站列表与登记 |
 | `GET/PUT` | `/api/v1/stations/:id` | 站点详情与校准更新 |
 | `GET` | `/api/v1/stations/:id/coverage` | 站点观测覆盖 |
+| `GET/POST` | `/api/v1/maintenance-windows` | 维护窗口列表（可按 `station_id` 过滤）与登记 |
+| `GET/PUT` | `/api/v1/maintenance-windows/:id` | 维护窗口详情与修改（已结束窗口只读） |
 | `GET/POST` | `/api/v1/observations` | 观测列表与录入 |
 | `POST` | `/api/v1/observations/:id/exclude` | 保存原因并排除观测 |
-| `GET` | `/api/v1/cases/:id/validate-observations` | 批量校验案例观测 |
+| `GET` | `/api/v1/cases/:id/validate-observations` | 批量校验案例观测（标注维护站） |
 | `GET/POST` | `/api/v1/cases` | 案例列表与草稿创建 |
 | `POST` | `/api/v1/cases/:id/transition` | 带 version 的状态迁移 |
 | `GET` | `/api/v1/localizations` | 查询不可覆盖的定位历史 |
@@ -185,7 +189,9 @@ npm --prefix frontend run build
 
 - Compose 项目名为空：确认根目录 `.env` 存在且 `COMPOSE_PROJECT_NAME` 为英文；Compose 文件也有固定 `name` 兜底。
 - 后端未 healthy：执行 `docker compose logs backend`，检查 JWT 长度、数据库密码和 PostgreSQL 健康状态。
-- 定位返回 `FREQUENCY_MISMATCH`：确认每条观测与案例中心频率的偏差不超过该观测带宽的一半。
+- 定位返回 `FREQUENCY_MISMATCH`：确认每条参与观测与案例中心频率的偏差不超过该观测带宽的一半。
+- 录入观测返回 `STATION_IN_MAINTENANCE`：站点处于生效维护窗口，窗口结束（`end_at`）后自动恢复；无需改动站点状态。
+- 维护窗口保存返回 `MAINTENANCE_WINDOW_OVERLAP`：同一站点窗口区间不能重叠（半开区间，端点相接允许）；已结束窗口为历史记录，返回 `MAINTENANCE_WINDOW_CLOSED`，不能再修改。
 - 定位返回 `GEOMETRY_DEGENERATE`：增加不同方位几何的测向站，不能通过放宽显示精度规避退化证据。
 - 状态迁移返回 `CASE_VERSION_CONFLICT`：其他请求已更新案例，刷新列表后使用新 version 重试。
 - 登录后出现 401：清除当前标签页 `sessionStorage` 后重新登录；令牌不会持久化到其他浏览器会话。

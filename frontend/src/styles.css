@@ -74,6 +74,10 @@ code { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.8rem; }
 .control-strip { margin-top: 24px; min-height: 64px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; background: #e9efea; border: 1px solid #d5dfd8; }
 .control-strip .MuiAlert-root { padding-top: 2px; padding-bottom: 2px; }
 .safety-alert { margin-top: 18px; }
+.maintenance-form { display: grid; gap: 12px; padding: 14px 16px; border: 1px dashed #c8a98a; background: #fdf8f2; border-radius: 6px; }
+.skip-alert { margin-bottom: 14px; }
+.skip-alert table { min-width: 0; margin-top: 8px; }
+.skip-alert .MuiTableCell-root { background: transparent; }
 .localization-grid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; margin-top: 24px; align-items: start; }
 .localization-grid .plot-section { margin: 0; }
 .estimate-rail { position: sticky; top: 88px; max-height: calc(100vh - 112px); overflow: auto; padding-left: 20px; border-left: 1px solid #cdd9d1; }
